@@ -1,0 +1,97 @@
+---
+title: "PubH 7462 HW8"
+author: "David McGowan"
+date: "2023-04-11"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(paletteer)
+library(plotly)
+library(tidycensus)
+library(osmdata)
+library(sf)
+library(ggmap)
+library(ggthemes)
+library(viridis)
+library(htmltools)
+
+api_key <- Sys.getenv("CENSUS_API_KEY")
+```
+
+```{r, warning=FALSE, message=FALSE, include=FALSE}
+# get the bounding boxes and county outline
+mn.box           <- osmdata::getbb("minnesota")
+hennepin.box     <- osmdata::getbb("hennepin")
+hennepin.outline <- osmdata::getbb("hennepin", format_out = "polygon")[[1]] %>%
+  as_tibble() %>%
+  rename(longitude = V1, latitude = V2)
+```
+
+```{r, include = FALSE, echo = FALSE, message = FALSE, warning = FALSE}
+# get census data
+age_blockgroup.df <- get_acs(
+  geography = "block group",
+  variables = "B01002_001E", # code for median age
+  state     = "MN",
+  county    = "Hennepin",
+  year      = 2020,
+  geometry  = TRUE,
+  cb        = FALSE,
+  key = api_key)
+
+# pretty up the census data for plotly
+age_blockgroup_plotly.df <- age_blockgroup.df %>%
+  mutate(blockgroup = str_extract(NAME, "^Block Group [1234567890]+,"),
+         blockgroup = str_extract(blockgroup, "[1234567890]+"),
+         tract = str_extract(NAME, "Tract .*, Hennepin"),
+         tract = str_remove(tract, "^Tract "),
+         tract = str_remove(tract, ", Hennepin"),
+         text_label = str_c("Tract: ",
+                            tract,
+                            "\nBlock Group: ",
+                            blockgroup,
+                            "\nMedian Age: ",
+                            estimate,
+                            " years"))
+
+# get base map from ggmap
+mn_base.map <- get_map(location = hennepin.box,
+                       source   = "stamen",
+                       maptype  = "terrain",
+                       crop = TRUE)
+
+# create base map
+hennepin_base.gg <- ggmap(mn_base.map) +
+  geom_polygon(data = hennepin.outline,
+               aes(x = longitude, y = latitude),
+               color = "black", size = 1.6, alpha = 0.1) +
+  theme_map() +
+  theme(plot.title = element_text(size  = 16, hjust = 0.5),
+        legend.text  = element_text(size = 16),
+        legend.title = element_text(size = 16),
+        legend.position = "right")
+
+# adding age by block group
+age_blockgroup.ggmap <- hennepin_base.gg +  
+  geom_sf(data = age_blockgroup_plotly.df, 
+          aes(fill = estimate, text = text_label),
+          color = "black", size = 0.1,
+          inherit.aes = FALSE) + 
+  labs(title = "Hennepin County, MN 2020 ACS Median Age") + 
+  scale_fill_viridis_c("Median Age (years)",) +
+  theme_map() +
+  theme(plot.title   = element_text(size  = 14, hjust = 0.25),
+        legend.text  = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        legend.position = "right")
+```
+
+## We will plot the median age of each census blockgroup in Hennepin County, as of 2020. Hover over the plot to get more details, and draw a box over the plot to zoom in.
+
+```{r, echo=FALSE}
+# plotly'ing
+ggplotly(age_blockgroup.ggmap,
+         tooltip = "text")
+```
